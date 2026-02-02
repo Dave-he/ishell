@@ -1,8 +1,7 @@
 use crate::ai::AiManager;
 use crate::config::ConfigManager;
 use crate::ssh::SshSession;
-use crate::types::{AiProviderType, AiChannelMessage, SshMessage, SftpMessage, FileEntry};
-use crate::types::*;
+use crate::types::{AiProviderType, AppConfig, ConnectionStatus, SshConfig};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 
@@ -77,24 +76,9 @@ pub struct AppState {
     pub ai_msg_tx: mpsc::UnboundedSender<AiChannelMessage>, // 后台->UI
     pub ai_msg_rx: Arc<std::sync::Mutex<mpsc::UnboundedReceiver<AiChannelMessage>>>,
 
-    // SFTP 异步通信 (v0.3.0)
-    pub sftp_msg_tx: mpsc::UnboundedSender<SftpMessage>, // 后台->UI
-    pub sftp_msg_rx: Arc<std::sync::Mutex<mpsc::UnboundedReceiver<SftpMessage>>>,
-
     // 系统监控（模拟）
     pub cpu_usage: f32,
     pub mem_usage: f32,
-
-    // SFTP 文件浏览器 (v0.3.0)
-    pub show_file_browser: bool,
-    pub remote_current_path: String,
-    pub local_current_path: std::path::PathBuf,
-    pub remote_files: Vec<FileEntry>,
-    pub local_files: Vec<FileEntry>,
-    pub selected_remote_files: Vec<String>,
-    pub selected_local_file: Option<std::path::PathBuf>,
-    pub sftp_progress: f32,
-    pub sftp_status: String,
 
     // Tokio 运行时
     pub runtime: Arc<tokio::runtime::Runtime>,
