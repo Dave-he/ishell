@@ -1,0 +1,50 @@
+# 🚀 iShell 快速开始
+
+## 一键启动
+
+```bash
+cd /Users/hyx/codespace/ishell
+./run.sh
+```
+
+## 手动启动
+
+```bash
+cd /Users/hyx/codespace/ishell
+cargo run
+```
+
+## 功能体验
+
+### 1. 创建连接
+- 点击 "➕ New Connection"
+- 填写服务器信息
+- 点击 "Connect"
+
+### 2. 使用终端
+尝试这些命令:
+- `help` - 帮助
+- `ls` - 列表
+- `date` - 日期
+- `whoami` - 用户
+- `echo Hello` - 打印
+
+### 3. AI助手
+- 切换provider: 🦙/🤖/🔷
+- 点击快速操作: 💡/📝/🔍/📚
+- 输入问题获取建议
+
+## 项目信息
+
+- **版本**: v0.1.0-mvp
+- **代码**: 541行Rust
+- **文档**: 6份完整文档
+- **状态**: ✅ 可运行
+
+## 完整文档
+
+查看 `PROJECT_COMPLETE.md` 了解更多
+
+## 问题？
+
+查看 `README.md` 的问题排查部分
