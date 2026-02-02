@@ -126,19 +126,50 @@ pub fn render_ai_panel(state: &mut AppState, ctx: &egui::Context) {
 }
 
 pub fn render_monitor_panel(state: &mut AppState, ctx: &egui::Context) {
+    // 使用模拟数据（v0.3.0 之前）
+    // v0.3.0 将实现真实系统监控
+    
     egui::TopBottomPanel::bottom("monitor")
         .default_height(100.0)
         .show(ctx, |ui| {
-            ui.heading("📊 System Monitor");
+            ui.heading("📊 系统监控");
             ui.separator();
 
-            ui.columns(2, |columns| {
-                columns[0].label(format!("CPU Usage: {:.1}%", state.cpu_usage));
-                columns[1].label(format!("Memory Usage: {:.1}%", state.mem_usage));
-            });
+            ui.columns(4, |columns| {
+                // CPU (模拟数据)
+                columns[0].vertical(|ui| {
+                    ui.label(egui::RichText::new("🔥 CPU").strong());
+                    ui.add(
+                        egui::ProgressBar::new(state.cpu_usage / 100.0)
+                            .text(format!("{:.1}%", state.cpu_usage))
+                    );
+                });
 
-            ui.add(egui::ProgressBar::new(state.cpu_usage / 100.0).show_percentage());
-            ui.add(egui::ProgressBar::new(state.mem_usage / 100.0).show_percentage());
+                // 内存 (模拟数据)
+                columns[1].vertical(|ui| {
+                    ui.label(egui::RichText::new("💾 Memory").strong());
+                    ui.add(
+                        egui::ProgressBar::new(state.mem_usage / 100.0)
+                            .text(format!("{:.1}%", state.mem_usage))
+                    );
+                });
+
+                // 磁盘 (模拟)
+                columns[2].vertical(|ui| {
+                    ui.label(egui::RichText::new("💿 Disk").strong());
+                    ui.add(
+                        egui::ProgressBar::new(0.65)
+                            .text("65.0%")
+                    );
+                });
+
+                // 网络 (模拟)
+                columns[3].vertical(|ui| {
+                    ui.label(egui::RichText::new("🌐 Network").strong());
+                    ui.label("↓ 1.2 MB/s");
+                    ui.label("↑ 256 KB/s");
+                });
+            });
         });
 }
 

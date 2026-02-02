@@ -48,6 +48,10 @@ impl App {
         let (ai_msg_tx, ai_msg_rx) = mpsc::unbounded_channel();
         let ai_msg_rx = Arc::new(std::sync::Mutex::new(ai_msg_rx));
 
+        // 创建 SFTP 通信通道（后台线程 -> UI）(v0.3.0)
+        let (sftp_msg_tx, sftp_msg_rx) = mpsc::unbounded_channel();
+        let sftp_msg_rx = Arc::new(std::sync::Mutex::new(sftp_msg_rx));
+
         // 初始化 AI Manager
         let mut ai_manager = AiManager::new();
 
@@ -113,6 +117,20 @@ impl App {
             ai_msg_tx,
             ai_msg_rx,
 
+            // SFTP 文件浏览器 (v0.3.0)
+            show_file_browser: false,
+            remote_current_path: "/".to_string(),
+            local_current_path: std::env::current_dir().unwrap_or_default(),
+            remote_files: Vec::new(),
+            local_files: Vec::new(),
+            selected_remote_files: Vec::new(),
+            selected_local_file: None,
+            sftp_progress: 0.0,
+            sftp_status: String::new(),
+
+            sftp_msg_tx,
+            sftp_msg_rx,
+
             cpu_usage: 0.0,
             mem_usage: 45.0,
 
@@ -129,10 +147,7 @@ impl eframe::App for App {
         // 处理异步消息
         process_ssh_messages(&mut self.state);
         process_ai_messages(&mut self.state);
-
-        // 更新系统监控（模拟）
-        self.state.cpu_usage = (self.state.cpu_usage + 0.5) % 100.0;
-        self.state.mem_usage = 45.0 + ((self.state.cpu_usage / 10.0).sin() * 10.0);
+        process_sftp_messages(&mut self.state);
 
         // Top menu bar
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
@@ -154,6 +169,10 @@ impl eframe::App for App {
                 });
 
                 ui.menu_button("🔧 Tools", |ui| {
+                    if ui.button("📁 File Browser").clicked() {
+                        self.state.show_file_browser = true;
+                        ui.close_menu();
+                    }
                     if ui.button("🔑 SSH Keys").clicked() {
                         ui.close_menu();
                     }
@@ -192,6 +211,12 @@ impl eframe::App for App {
         panels::render_monitor_panel(&mut self.state, ctx);
         panels::render_terminal_panel(&mut self.state, ctx);
         panels::render_new_connection_dialog(&mut self.state, ctx);
+        
+        // Render file browser (v0.3.0)
+        crate::ui::file_browser::render_file_browser(&mut self.state, ctx);
+
+        // Render file browser (v0.3.0)
+        crate::ui::file_browser::render_file_browser(&mut self.state, ctx);
 
         // 请求重绘
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -248,6 +273,32 @@ fn process_ai_messages(state: &mut AppState) {
                 state
                     .ai_messages
                     .push(("ai".to_string(), format!("❌ Error: {}", error)));
+            }
+        }
+    }
+}
+
+// 处理 SFTP 消息 (v0.3.0)
+fn process_sftp_messages(state: &mut AppState) {
+    let mut rx = state.sftp_msg_rx.lock().unwrap();
+    while let Ok(msg) = rx.try_recv() {
+        match msg {
+            crate::types::SftpMessage::FileList(files) => {
+                state.remote_files = files;
+                state.sftp_status = format!("已加载 {} 个文件", state.remote_files.len());
+            }
+            crate::types::SftpMessage::Progress(progress) => {
+                state.sftp_progress = progress;
+            }
+            crate::types::SftpMessage::Complete => {
+                state.sftp_progress = 1.0;
+                state.sftp_status = "操作完成".to_string();
+                // 刷新文件列表
+                // refresh_remote_files(state); // 注意：这需要在 UI 线程调用
+            }
+            crate::types::SftpMessage::Error(error) => {
+                state.sftp_progress = 0.0;
+                state.sftp_status = format!("❌ {}", error);
             }
         }
     }
@@ -491,6 +542,9 @@ mod tests {
         let (ai_msg_tx, ai_msg_rx) = mpsc::unbounded_channel();
         let ai_msg_rx = Arc::new(std::sync::Mutex::new(ai_msg_rx));
 
+        let (sftp_msg_tx, sftp_msg_rx) = mpsc::unbounded_channel();
+        let sftp_msg_rx = Arc::new(std::sync::Mutex::new(sftp_msg_rx));
+
         let ai_manager = Arc::new(TokioMutex::new(Some(AiManager::new())));
 
         let state = AppState {
@@ -525,6 +579,19 @@ mod tests {
 
             ai_msg_tx,
             ai_msg_rx,
+
+            show_file_browser: false,
+            remote_current_path: "/".to_string(),
+            local_current_path: std::env::current_dir().unwrap_or_default(),
+            remote_files: Vec::new(),
+            local_files: Vec::new(),
+            selected_remote_files: Vec::new(),
+            selected_local_file: None,
+            sftp_progress: 0.0,
+            sftp_status: String::new(),
+
+            sftp_msg_tx,
+            sftp_msg_rx,
 
             cpu_usage: 0.0,
             mem_usage: 0.0,

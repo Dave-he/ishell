@@ -1,41 +1,44 @@
-use ssh2::Sftp as Ssh2Sftp;
-use std::path::Path;
-use std::io::{Read, Write};
 use crate::types::{FileEntry, Result};
+use ssh2::Sftp as Ssh2Sftp;
+use std::io::{Read, Write};
+use std::path::Path;
 
-/// SFTP 客户端
+/// SFTP 客户端封装
 pub struct SftpClient {
     sftp: Ssh2Sftp,
 }
 
 impl SftpClient {
-    /// 创建 SFTP 客户端
+    /// 创建新的 SFTP 客户端
     pub fn new(sftp: Ssh2Sftp) -> Self {
         Self { sftp }
     }
-    
+
     /// 列出目录内容
     pub fn list_dir(&self, path: &str) -> Result<Vec<FileEntry>> {
-        let path_buf = Path::new(path);
-        let entries = self.sftp.readdir(path_buf)?;
+        let path = if path.is_empty() { "." } else { path };
+        
+        let entries = self.sftp.readdir(std::path::Path::new(path))?;
         
         let mut file_entries = Vec::new();
         for (path, stat) in entries {
             let name = path
                 .file_name()
                 .and_then(|n| n.to_str())
-                .unwrap_or("?")
+                .unwrap_or("")
                 .to_string();
             
             let path_str = path.to_string_lossy().to_string();
             let is_dir = stat.is_dir();
             let size = stat.size.unwrap_or(0);
             
-            let modified = stat.mtime.map(|mtime| {
-                std::time::UNIX_EPOCH + std::time::Duration::from_secs(mtime)
+            // 转换时间戳
+            let modified = stat.mtime.and_then(|mtime| {
+                std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(mtime))
             });
             
-            let permissions = stat.perm.map(|perm| format!("{:o}", perm));
+            // 转换权限
+            let permissions = stat.perm.map(|p| format!("{:o}", p));
             
             file_entries.push(FileEntry {
                 name,
@@ -58,19 +61,27 @@ impl SftpClient {
         
         Ok(file_entries)
     }
-    
-    /// 上传文件
-    pub fn upload_file<F>(&self, local: &Path, remote: &str, mut progress_callback: F) -> Result<()>
+
+    /// 上传文件（带进度回调）
+    pub fn upload_file<F>(
+        &self,
+        local: &Path,
+        remote: &str,
+        mut progress_callback: F,
+    ) -> Result<()>
     where
         F: FnMut(f32),
     {
+        // 打开本地文件
         let mut local_file = std::fs::File::open(local)?;
         let file_size = local_file.metadata()?.len();
         
-        let mut remote_file = self.sftp.create(Path::new(remote))?;
+        // 创建远程文件
+        let mut remote_file = self.sftp.create(std::path::Path::new(remote))?;
         
-        let mut buffer = vec![0u8; 8192]; // 8KB buffer
-        let mut total_written = 0u64;
+        // 分块传输
+        let mut buffer = vec![0u8; 8192]; // 8KB 缓冲区
+        let mut total_sent = 0u64;
         
         loop {
             let bytes_read = local_file.read(&mut buffer)?;
@@ -79,27 +90,41 @@ impl SftpClient {
             }
             
             remote_file.write_all(&buffer[..bytes_read])?;
-            total_written += bytes_read as u64;
+            total_sent += bytes_read as u64;
             
-            let progress = (total_written as f32 / file_size as f32) * 100.0;
+            // 报告进度
+            let progress = if file_size > 0 {
+                (total_sent as f32 / file_size as f32).min(1.0)
+            } else {
+                1.0
+            };
             progress_callback(progress);
         }
         
+        remote_file.flush()?;
         Ok(())
     }
-    
-    /// 下载文件
-    pub fn download_file<F>(&self, remote: &str, local: &Path, mut progress_callback: F) -> Result<()>
+
+    /// 下载文件（带进度回调）
+    pub fn download_file<F>(
+        &self,
+        remote: &str,
+        local: &Path,
+        mut progress_callback: F,
+    ) -> Result<()>
     where
         F: FnMut(f32),
     {
-        let mut remote_file = self.sftp.open(Path::new(remote))?;
+        // 打开远程文件
+        let mut remote_file = self.sftp.open(std::path::Path::new(remote))?;
         let file_size = remote_file.stat()?.size.unwrap_or(0);
         
+        // 创建本地文件
         let mut local_file = std::fs::File::create(local)?;
         
-        let mut buffer = vec![0u8; 8192];
-        let mut total_read = 0u64;
+        // 分块传输
+        let mut buffer = vec![0u8; 8192]; // 8KB 缓冲区
+        let mut total_received = 0u64;
         
         loop {
             let bytes_read = remote_file.read(&mut buffer)?;
@@ -108,58 +133,120 @@ impl SftpClient {
             }
             
             local_file.write_all(&buffer[..bytes_read])?;
-            total_read += bytes_read as u64;
+            total_received += bytes_read as u64;
             
+            // 报告进度
             let progress = if file_size > 0 {
-                (total_read as f32 / file_size as f32) * 100.0
+                (total_received as f32 / file_size as f32).min(1.0)
             } else {
-                0.0
+                1.0
             };
             progress_callback(progress);
         }
         
+        local_file.flush()?;
         Ok(())
     }
-    
-    /// 删除文件
-    pub fn delete_file(&self, path: &str) -> Result<()> {
-        self.sftp.unlink(Path::new(path))?;
+
+    /// 删除文件或目录
+    pub fn delete(&self, path: &str) -> Result<()> {
+        let path_obj = std::path::Path::new(path);
+        let stat = self.sftp.stat(path_obj)?;
+        
+        if stat.is_dir() {
+            // 递归删除目录
+            self.delete_dir_recursive(path)?;
+        } else {
+            // 删除文件
+            self.sftp.unlink(path_obj)?;
+        }
+        
         Ok(())
     }
-    
-    /// 删除目录
-    pub fn delete_dir(&self, path: &str) -> Result<()> {
-        self.sftp.rmdir(Path::new(path))?;
+
+    /// 递归删除目录
+    fn delete_dir_recursive(&self, path: &str) -> Result<()> {
+        // 列出目录内容
+        let entries = self.sftp.readdir(std::path::Path::new(path))?;
+        
+        // 删除所有子项
+        for (entry_path, stat) in entries {
+            let entry_path_str = entry_path.to_string_lossy();
+            
+            // 跳过 . 和 ..
+            if entry_path_str.ends_with("/.") || entry_path_str.ends_with("/..") {
+                continue;
+            }
+            
+            if stat.is_dir() {
+                self.delete_dir_recursive(&entry_path_str)?;
+            } else {
+                self.sftp.unlink(&entry_path)?;
+            }
+        }
+        
+        // 删除空目录
+        self.sftp.rmdir(std::path::Path::new(path))?;
         Ok(())
     }
-    
+
     /// 创建目录
     pub fn create_dir(&self, path: &str) -> Result<()> {
-        self.sftp.mkdir(Path::new(path), 0o755)?;
+        self.sftp.mkdir(
+            std::path::Path::new(path),
+            0o755, // rwxr-xr-x
+        )?;
         Ok(())
     }
-    
-    /// 重命名/移动文件
-    pub fn rename(&self, old_path: &str, new_path: &str) -> Result<()> {
-        self.sftp.rename(Path::new(old_path), Path::new(new_path), None)?;
-        Ok(())
+
+    /// 获取文件/目录状态
+    pub fn stat(&self, path: &str) -> Result<FileEntry> {
+        let stat = self.sftp.stat(std::path::Path::new(path))?;
+        
+        let name = std::path::Path::new(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        
+        let is_dir = stat.is_dir();
+        let size = stat.size.unwrap_or(0);
+        let modified = stat.mtime.and_then(|mtime| {
+            std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(mtime))
+        });
+        let permissions = stat.perm.map(|p| format!("{:o}", p));
+        
+        Ok(FileEntry {
+            name,
+            path: path.to_string(),
+            is_dir,
+            size,
+            modified,
+            permissions,
+        })
     }
 }
-
-// ============================================================================
-// 测试
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
+    // 注意：这些测试需要真实的 SSH 连接，通常在集成测试中运行
+    // 这里提供测试框架结构
+
     #[test]
     fn test_sftp_client_creation() {
-        // 这个测试需要真实的 SSH 连接，通常会被忽略
-        // 或者使用 mock
+        // 测试 SFTP 客户端创建
+        // 需要模拟或真实 SSH 会话
     }
-    
-    // 注意：完整的 SFTP 测试需要真实的 SSH 服务器
-    // 可以使用 Docker 容器进行集成测试
+
+    #[test]
+    fn test_list_dir() {
+        // 测试目录列表
+    }
+
+    #[test]
+    fn test_file_operations() {
+        // 测试文件上传/下载/删除
+    }
 }

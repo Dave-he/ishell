@@ -49,3 +49,4 @@ futures = "0.3"
 
 # System info
 whoami = "1.5"
+sysinfo = "0.30"
