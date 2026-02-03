@@ -73,6 +73,26 @@ pub fn render_file_browser(state: &mut AppState, ctx: &egui::Context) {
 
             // 状态栏
             ui.horizontal(|ui| {
+                // 下载按钮
+                let download_enabled = !state.selected_remote_files.is_empty();
+                if ui
+                    .add_enabled(download_enabled, egui::Button::new("⬇️ Download"))
+                    .on_hover_text("Download selected file(s) to Downloads folder")
+                    .clicked()
+                {
+                    download_selected_files(state);
+                }
+
+                // 上传按钮
+                if ui.button("⬆️ Upload").on_hover_text("Upload file to current directory").clicked() {
+                    // 使用 rfd (rusty file dialog) 选择文件
+                    if let Some(file_path) = rfd::FileDialog::new().pick_file() {
+                        upload_file(state, file_path);
+                    }
+                }
+
+                ui.separator();
+
                 if ui.button("❌ Close").clicked() {
                     state.show_file_browser = false;
                 }
@@ -222,5 +242,142 @@ fn format_size(size: u64) -> String {
         format!("{:.2} KB", size as f64 / KB as f64)
     } else {
         format!("{} B", size)
+    }
+}
+
+/// 上传文件到远程服务器
+fn upload_file(state: &mut AppState, local_path: std::path::PathBuf) {
+    use std::sync::Arc;
+    
+    if let Some(selected_idx) = state.selected_connection {
+        if let Some(Some(session)) = state.ssh_sessions.get(selected_idx) {
+            let session_clone = Arc::clone(session);
+            let remote_path = state.remote_current_path.clone();
+            let tx = state.sftp_msg_tx.clone();
+            
+            // 获取文件名
+            let file_name = local_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            
+            // 构建完整的远程路径
+            let remote_file_path = if remote_path.ends_with('/') {
+                format!("{}{}", remote_path, file_name)
+            } else {
+                format!("{}/{}", remote_path, file_name)
+            };
+            
+            state.sftp_status = format!("Uploading {}...", file_name);
+            state.sftp_progress = 0.0;
+            
+            // 在后台线程执行上传
+            std::thread::spawn(move || {
+                let session = session_clone.lock().unwrap();
+                match session.sftp() {
+                    Ok(sftp_client) => {
+                        let tx_clone = tx.clone();
+                        let result = sftp_client.upload_file(
+                            &local_path,
+                            &remote_file_path,
+                            move |progress| {
+                                let _ = tx_clone.send(crate::types::SftpMessage::Progress(progress));
+                            }
+                        );
+                        
+                        match result {
+                            Ok(_) => {
+                                let _ = tx.send(crate::types::SftpMessage::Complete);
+                            }
+                            Err(e) => {
+                                let _ = tx.send(crate::types::SftpMessage::Error(format!(
+                                    "Upload failed: {}",
+                                    e
+                                )));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(crate::types::SftpMessage::Error(format!(
+                            "SFTP connection failed: {}",
+                            e
+                        )));
+                    }
+                }
+            });
+        }
+    }
+}
+
+/// 下载选中的文件到本地 Downloads 文件夹
+fn download_selected_files(state: &mut AppState) {
+    use std::sync::Arc;
+    
+    if state.selected_remote_files.is_empty() {
+        return;
+    }
+    
+    // 获取下载目录（使用 Downloads 文件夹）
+    let download_dir = dirs::download_dir().unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_default()
+    });
+    
+    if let Some(selected_idx) = state.selected_connection {
+        if let Some(Some(session)) = state.ssh_sessions.get(selected_idx) {
+            let session_clone = Arc::clone(session);
+            let remote_files = state.selected_remote_files.clone();
+            let tx = state.sftp_msg_tx.clone();
+            
+            state.sftp_status = format!("Downloading {} file(s)...", remote_files.len());
+            state.sftp_progress = 0.0;
+            
+            // 在后台线程执行下载
+            std::thread::spawn(move || {
+                let session = session_clone.lock().unwrap();
+                match session.sftp() {
+                    Ok(sftp_client) => {
+                        let total_files = remote_files.len();
+                        for (idx, remote_path) in remote_files.iter().enumerate() {
+                            // 提取文件名
+                            let file_name = std::path::Path::new(remote_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("download")
+                                .to_string();
+                            
+                            let local_path = download_dir.join(&file_name);
+                            
+                            let tx_clone = tx.clone();
+                            let result = sftp_client.download_file(
+                                remote_path,
+                                &local_path,
+                                move |progress| {
+                                    // 计算总体进度（考虑多个文件）
+                                    let total_progress = (idx as f32 + progress) / total_files as f32;
+                                    let _ = tx_clone.send(crate::types::SftpMessage::Progress(total_progress));
+                                }
+                            );
+                            
+                            if let Err(e) = result {
+                                let _ = tx.send(crate::types::SftpMessage::Error(format!(
+                                    "Failed to download {}: {}",
+                                    file_name, e
+                                )));
+                                return;
+                            }
+                        }
+                        
+                        let _ = tx.send(crate::types::SftpMessage::Complete);
+                    }
+                    Err(e) => {
+                        let _ = tx.send(crate::types::SftpMessage::Error(format!(
+                            "SFTP connection failed: {}",
+                            e
+                        )));
+                    }
+                }
+            });
+        }
     }
 }
