@@ -1,6 +1,7 @@
 use crate::state::AppState;
-use crate::types::ConnectionStatus;
+use crate::types::{ConnectionStatus, FileEntry};
 use eframe::egui;
+use std::path::PathBuf;
 
 // ============================================================================
 // 文件浏览器 UI (简化版 v0.3.0)
@@ -11,108 +12,274 @@ pub fn render_file_browser(state: &mut AppState, ctx: &egui::Context) {
         return;
     }
 
-    egui::Window::new("📁 SFTP File Browser")
-        .default_width(900.0)
+    egui::Window::new("📁 文件浏览器")
+        .default_width(1000.0)
         .default_height(600.0)
+        .resizable(true)
         .show(ctx, |ui| {
-            // 检查是否有连接
-            if state.selected_connection.is_none() {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    "⚠️ Please connect to a server first!",
-                );
-                return;
-            }
-
-            let selected_idx = state.selected_connection.unwrap();
-            let is_connected = state.connection_status.get(selected_idx)
-                == Some(&ConnectionStatus::Connected);
-
-            if !is_connected {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    "⚠️ Server not connected! Please connect first.",
-                );
-                return;
-            }
-
-            // 路径导航栏
+            // 工具栏
             ui.horizontal(|ui| {
-                ui.label("Remote Path:");
-                ui.label(&state.remote_current_path);
-
-                if ui.button("🔄 Refresh").clicked() {
-                    request_file_list(state);
-                }
-
+                ui.heading("文件传输");
+                
                 ui.separator();
-
-                if ui.button("🏠 Home").clicked() {
-                    state.remote_current_path = "/".to_string();
-                    request_file_list(state);
+                
+                // 上传按钮
+                let upload_enabled = !state.selected_local_files.is_empty() && is_connected(state);
+                if ui.add_enabled(upload_enabled, egui::Button::new("⬆️ 上传"))
+                    .on_hover_text("上传选中的本地文件")
+                    .clicked() 
+                {
+                    upload_selected_files(state);
                 }
-
-                if ui.button("⬆️ Up").clicked() {
-                    go_parent_dir(state);
-                }
-            });
-
-            ui.separator();
-
-            // 远程文件列表
-            ui.heading("☁️ Remote Files");
-            ui.separator();
-
-            egui::ScrollArea::vertical()
-                .max_height(450.0)
-                .show(ui, |ui| {
-                    render_remote_files(state, ui);
-                });
-
-            ui.separator();
-
-            // 状态栏
-            ui.horizontal(|ui| {
+                
                 // 下载按钮
                 let download_enabled = !state.selected_remote_files.is_empty();
-                if ui
-                    .add_enabled(download_enabled, egui::Button::new("⬇️ Download"))
-                    .on_hover_text("Download selected file(s) to Downloads folder")
-                    .clicked()
+                if ui.add_enabled(download_enabled, egui::Button::new("⬇️ 下载"))
+                    .on_hover_text("下载选中的远程文件")
+                    .clicked() 
                 {
                     download_selected_files(state);
                 }
-
-                // 上传按钮
-                if ui.button("⬆️ Upload").on_hover_text("Upload file to current directory").clicked() {
-                    // 使用 rfd (rusty file dialog) 选择文件
-                    if let Some(file_path) = rfd::FileDialog::new().pick_file() {
-                        upload_file(state, file_path);
+                
+                ui.separator();
+                
+                // 刷新按钮
+                if ui.button("🔄 刷新").clicked() {
+                    refresh_local_files(state);
+                    if is_connected(state) {
+                        request_file_list(state);
                     }
                 }
-
-                ui.separator();
-
-                if ui.button("❌ Close").clicked() {
-                    state.show_file_browser = false;
-                }
-
-                ui.separator();
-
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("❌ 关闭").clicked() {
+                        state.show_file_browser = false;
+                    }
+                });
+            });
+            
+            ui.separator();
+            
+            // 双栏布局
+            ui.columns(2, |columns| {
+                // 左栏：本地文件
+                columns[0].group(|ui| {
+                    render_local_panel(state, ui);
+                });
+                
+                // 右栏：远程文件  
+                columns[1].group(|ui| {
+                    render_remote_panel(state, ui);
+                });
+            });
+            
+            ui.separator();
+            
+            // 状态栏
+            ui.horizontal(|ui| {
                 if !state.sftp_status.is_empty() {
-                    ui.label(&state.sftp_status);
+                    let color = if state.sftp_status.contains("Error") || state.sftp_status.contains("failed") {
+                        egui::Color32::RED
+                    } else if state.sftp_status.contains("Complete") || state.sftp_status.contains("成功") {
+                        egui::Color32::GREEN
+                    } else {
+                        egui::Color32::LIGHT_BLUE
+                    };
+                    ui.colored_label(color, &state.sftp_status);
+                } else {
+                    ui.label("就绪");
                 }
             });
-
+            
             // 进度条
             if state.sftp_progress > 0.0 && state.sftp_progress < 1.0 {
                 ui.separator();
                 ui.add(
                     egui::ProgressBar::new(state.sftp_progress)
-                        .text(format!("{:.0}%", state.sftp_progress * 100.0)),
+                        .text(format!("{:.0}%", state.sftp_progress * 100.0))
+                        .animate(true),
                 );
             }
         });
+    
+    // 处理文件拖入
+    handle_file_drop(state, ctx);
+}
+
+// ============================================================================
+// 本地文件面板
+// ============================================================================
+
+fn render_local_panel(state: &mut AppState, ui: &mut egui::Ui) {
+    ui.vertical(|ui| {
+        ui.heading("💻 本地文件");
+        ui.separator();
+        
+        // 路径导航
+        ui.horizontal(|ui| {
+            ui.label("路径:");
+            
+            // Browse 按钮
+            if ui.button("📂 浏览...").on_hover_text("选择文件夹").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_directory(&state.local_current_path)
+                    .pick_folder() 
+                {
+                    state.local_current_path = path;
+                    refresh_local_files(state);
+                }
+            }
+            
+            // 上级目录
+            if ui.button("⬆️").on_hover_text("返回上级").clicked() {
+                go_local_parent_dir(state);
+            }
+            
+            // Home
+            if ui.button("🏠").on_hover_text("主目录").clicked() {
+                if let Some(home) = dirs::home_dir() {
+                    state.local_current_path = home;
+                    refresh_local_files(state);
+                }
+            }
+        });
+        
+        // 当前路径
+        ui.label(
+            egui::RichText::new(state.local_current_path.to_string_lossy())
+                .small()
+                .weak()
+        );
+        
+        ui.separator();
+        
+        // 文件列表
+        egui::ScrollArea::vertical()
+            .max_height(400.0)
+            .show(ui, |ui| {
+                render_local_files(state, ui);
+            });
+        
+        // 底部信息
+        ui.separator();
+        ui.label(format!("已选择: {} 个文件", state.selected_local_files.len()));
+    });
+}
+
+fn render_local_files(state: &mut AppState, ui: &mut egui::Ui) {
+    // 初始化加载
+    if state.local_files.is_empty() {
+        refresh_local_files(state);
+    }
+    
+    // ".." 返回上级
+    if state.local_current_path.parent().is_some() {
+        if ui.selectable_label(false, "📁 ..").on_hover_text("返回上级").clicked() {
+            go_local_parent_dir(state);
+        }
+    }
+    
+    // 显示文件列表
+    for entry in state.local_files.clone() {
+        let icon = if entry.is_dir { "📁" } else { "📄" };
+        let size_str = if !entry.is_dir && entry.size > 0 {
+            format_size(entry.size)
+        } else {
+            String::new()
+        };
+        
+        let label = format!("{} {}  {}", icon, entry.name, size_str);
+        
+        let is_selected = state.selected_local_files
+            .iter()
+            .any(|p| p.to_string_lossy() == entry.path);
+        
+        let response = ui.selectable_label(is_selected, label)
+            .on_hover_text(&entry.path);
+        
+        if response.clicked() {
+            let path = PathBuf::from(&entry.path);
+            let modifiers = ui.input(|i| i.modifiers);
+            
+            if entry.is_dir {
+                // 进入目录
+                state.local_current_path = path;
+                refresh_local_files(state);
+            } else {
+                // 文件选择（支持多选）
+                if modifiers.ctrl || modifiers.command {
+                    // Ctrl/Cmd: 切换选中状态
+                    if let Some(pos) = state.selected_local_files.iter().position(|p| p == &path) {
+                        state.selected_local_files.remove(pos);
+                    } else {
+                        state.selected_local_files.push(path);
+                    }
+                } else {
+                    // 普通点击: 单选
+                    state.selected_local_files.clear();
+                    state.selected_local_files.push(path);
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// 远程文件面板
+// ============================================================================
+
+fn render_remote_panel(state: &mut AppState, ui: &mut egui::Ui) {
+    ui.vertical(|ui| {
+        ui.heading("☁️ 远程文件");
+        ui.separator();
+        
+        // 检查连接状态
+        if !is_connected(state) {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                "⚠️ 请先连接到 SSH 服务器"
+            );
+            return;
+        }
+        
+        // 路径导航
+        ui.horizontal(|ui| {
+            ui.label("路径:");
+            
+            if ui.button("🏠").on_hover_text("根目录").clicked() {
+                state.remote_current_path = "/".to_string();
+                request_file_list(state);
+            }
+            
+            if ui.button("⬆️").on_hover_text("返回上级").clicked() {
+                go_parent_dir(state);
+            }
+            
+            if ui.button("🔄").on_hover_text("刷新").clicked() {
+                request_file_list(state);
+            }
+        });
+        
+        // 当前路径
+        ui.label(
+            egui::RichText::new(&state.remote_current_path)
+                .small()
+                .weak()
+        );
+        
+        ui.separator();
+        
+        // 文件列表
+        egui::ScrollArea::vertical()
+            .max_height(400.0)
+            .show(ui, |ui| {
+                render_remote_files(state, ui);
+            });
+        
+        // 底部信息
+        ui.separator();
+        ui.label(format!("已选择: {} 个文件", state.selected_remote_files.len()));
+    });
 }
 
 // ============================================================================
@@ -120,11 +287,16 @@ pub fn render_file_browser(state: &mut AppState, ctx: &egui::Context) {
 // ============================================================================
 
 fn render_remote_files(state: &mut AppState, ui: &mut egui::Ui) {
+    // 初始化加载
+    if state.remote_files.is_empty() {
+        request_file_list(state);
+    }
+    
     // ".." 返回上级目录
     if state.remote_current_path != "/" {
         if ui
             .selectable_label(false, "📁 ..")
-            .on_hover_text("Go to parent directory")
+            .on_hover_text("返回上级")
             .clicked()
         {
             go_parent_dir(state);
@@ -147,15 +319,24 @@ fn render_remote_files(state: &mut AppState, ui: &mut egui::Ui) {
             .on_hover_text(&entry.path);
 
         if response.clicked() {
+            let modifiers = ui.input(|i| i.modifiers);
+            
             if entry.is_dir {
                 // 进入目录
                 state.remote_current_path = entry.path.clone();
                 request_file_list(state);
             } else {
-                // 切换文件选择状态
-                if is_selected {
-                    state.selected_remote_files.retain(|p| p != &entry.path);
+                // 文件选择（支持多选）
+                if modifiers.ctrl || modifiers.command {
+                    // Ctrl/Cmd: 切换选中状态
+                    if let Some(pos) = state.selected_remote_files.iter().position(|p| p == &entry.path) {
+                        state.selected_remote_files.remove(pos);
+                    } else {
+                        state.selected_remote_files.push(entry.path.clone());
+                    }
                 } else {
+                    // 普通点击: 单选
+                    state.selected_remote_files.clear();
                     state.selected_remote_files.push(entry.path.clone());
                 }
             }
@@ -206,6 +387,107 @@ fn request_file_list(state: &mut AppState) {
             });
         }
     }
+}
+
+// ============================================================================
+// 本地文件操作辅助函数
+// ============================================================================
+
+/// 刷新本地文件列表
+fn refresh_local_files(state: &mut AppState) {
+    state.local_files.clear();
+    
+    match std::fs::read_dir(&state.local_current_path) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    let path = entry.path();
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    
+                    let file_entry = FileEntry {
+                        name,
+                        path: path.to_string_lossy().to_string(),
+                        is_dir: metadata.is_dir(),
+                        size: metadata.len(),
+                        modified: metadata.modified().ok(),
+                        permissions: None,
+                    };
+                    
+                    state.local_files.push(file_entry);
+                }
+            }
+            
+            // 排序：目录在前，然后按名称
+            state.local_files.sort_by(|a, b| {
+                match (a.is_dir, b.is_dir) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                }
+            });
+        }
+        Err(e) => {
+            eprintln!("Failed to read local directory: {}", e);
+        }
+    }
+}
+
+/// 本地目录返回上级
+fn go_local_parent_dir(state: &mut AppState) {
+    if let Some(parent) = state.local_current_path.parent() {
+        state.local_current_path = parent.to_path_buf();
+        refresh_local_files(state);
+        state.selected_local_files.clear();
+    }
+}
+
+/// 检查是否已连接
+fn is_connected(state: &AppState) -> bool {
+    state.selected_connection
+        .and_then(|idx| state.connection_status.get(idx))
+        .map(|s| *s == ConnectionStatus::Connected)
+        .unwrap_or(false)
+}
+
+/// 上传选中的本地文件
+fn upload_selected_files(state: &mut AppState) {
+    if state.selected_local_files.is_empty() {
+        return;
+    }
+    
+    for local_path in state.selected_local_files.clone() {
+        upload_file(state, local_path);
+    }
+    
+    state.selected_local_files.clear();
+}
+
+/// 处理文件拖入
+fn handle_file_drop(state: &mut AppState, ctx: &egui::Context) {
+    ctx.input(|i| {
+        if !i.raw.dropped_files.is_empty() {
+            let files = i.raw.dropped_files.clone();
+            
+            // 检查是否已连接
+            if !is_connected(state) {
+                state.sftp_status = "❌ Error: Please connect to server first".to_string();
+                return;
+            }
+            
+            state.sftp_status = format!("Preparing to upload {} file(s)...", files.len());
+            
+            // 上传拖入的文件
+            for dropped_file in files {
+                if let Some(path) = dropped_file.path {
+                    upload_file(state, path);
+                }
+            }
+        }
+    });
 }
 
 /// 返回上级目录

@@ -125,6 +125,7 @@ impl App {
             local_files: Vec::new(),
             selected_remote_files: Vec::new(),
             selected_local_file: None,
+            selected_local_files: Vec::new(),  // 多选支持
             sftp_progress: 0.0,
             sftp_status: String::new(),
 
@@ -641,6 +642,7 @@ mod tests {
             local_files: Vec::new(),
             selected_remote_files: Vec::new(),
             selected_local_file: None,
+            selected_local_files: Vec::new(),
             sftp_progress: 0.0,
             sftp_status: String::new(),
 

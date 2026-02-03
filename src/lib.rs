@@ -7,6 +7,7 @@ pub mod monitor;
 pub mod sftp;
 pub mod ssh;
 pub mod state;
+pub mod tabs;  // v1.0.0: 多标签页系统
 pub mod theme;
 pub mod types;
 pub mod ui;

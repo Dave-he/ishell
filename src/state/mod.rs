@@ -86,6 +86,7 @@ pub struct AppState {
     pub local_files: Vec<FileEntry>,
     pub selected_remote_files: Vec<String>,
     pub selected_local_file: Option<std::path::PathBuf>,
+    pub selected_local_files: Vec<std::path::PathBuf>,  // 多选支持
     pub sftp_progress: f32,
     pub sftp_status: String,
 
@@ -109,4 +110,95 @@ pub struct AppState {
 
     // Tokio 运行时
     pub runtime: Arc<tokio::runtime::Runtime>,
+}
+
+// ============================================================================
+// 标签页状态结构 (v1.0.0)
+// ============================================================================
+
+/// 每个标签页的独立状态
+pub struct TabState {
+    /// SSH 会话
+    pub ssh_session: Option<Arc<std::sync::Mutex<SshSession>>>,
+    
+    /// 连接状态
+    pub connection_status: ConnectionStatus,
+    
+    /// 终端输出缓冲区
+    pub terminal_output: String,
+    
+    /// 命令输入
+    pub command_input: String,
+    
+    /// 命令历史
+    pub command_history: CommandHistory,
+    
+    /// SFTP 状态
+    pub sftp_state: Option<SftpTabState>,
+    
+    /// AI 对话历史
+    pub ai_messages: Vec<(String, String)>,
+    
+    /// AI 输入
+    pub ai_input: String,
+}
+
+// 手动实现 Debug，跳过 SshSession
+impl std::fmt::Debug for TabState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TabState")
+            .field("has_ssh_session", &self.ssh_session.is_some())
+            .field("connection_status", &self.connection_status)
+            .field("terminal_output_len", &self.terminal_output.len())
+            .field("command_input", &self.command_input)
+            .field("ai_messages_count", &self.ai_messages.len())
+            .finish()
+    }
+}
+
+impl TabState {
+    pub fn new() -> Self {
+        Self {
+            ssh_session: None,
+            connection_status: ConnectionStatus::Disconnected,
+            terminal_output: String::new(),
+            command_input: String::new(),
+            command_history: CommandHistory::new(),
+            sftp_state: None,
+            ai_messages: Vec::new(),
+            ai_input: String::new(),
+        }
+    }
+    
+    /// 清空终端输出
+    pub fn clear_terminal(&mut self) {
+        self.terminal_output.clear();
+    }
+    
+    /// 追加终端输出（带大小限制）
+    pub fn append_output(&mut self, output: &str) {
+        const MAX_OUTPUT_SIZE: usize = 100_000; // 100KB
+        
+        self.terminal_output.push_str(output);
+        
+        // 限制缓冲区大小
+        if self.terminal_output.len() > MAX_OUTPUT_SIZE {
+            let trim_point = self.terminal_output.len() - MAX_OUTPUT_SIZE;
+            self.terminal_output = self.terminal_output[trim_point..].to_string();
+        }
+    }
+}
+
+impl Default for TabState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// SFTP 标签页状态
+#[derive(Debug)]
+pub struct SftpTabState {
+    pub remote_path: String,
+    pub remote_files: Vec<FileEntry>,
+    pub selected_files: Vec<String>,
 }
