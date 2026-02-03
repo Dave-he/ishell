@@ -580,7 +580,6 @@ pub fn create_connection(state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     // Helper to create a testable app instance
     fn create_test_app() -> App {

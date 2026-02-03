@@ -205,67 +205,50 @@ pub fn render_monitor_panel(state: &mut AppState, ctx: &egui::Context) {
 }
 
 pub fn render_terminal_panel(state: &mut AppState, ctx: &egui::Context) {
-    egui::CentralPanel::default().show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.heading("💻 Terminal");
-            
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // 历史搜索按钮
-                if ui.button("🔍 History (Ctrl+R)").clicked() 
-                    || ui.input(|i| i.key_pressed(egui::Key::R) && i.modifiers.ctrl) {
-                    state.show_history_search = !state.show_history_search;
-                }
-            });
-        });
-        
-        ui.separator();
-
-        egui::ScrollArea::vertical()
-            .min_scrolled_height(ui.available_height() - 60.0)
-            .show(ui, |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(&mut state.terminal_output)
-                        .code_editor()
-                        .desired_rows(10)
-                        .lock_focus(true),
-                );
-            });
-
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut state.command_input).hint_text("Enter command..."),
-            );
-                if (ui.button("Execute").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                    && !state.command_input.trim().is_empty() {
-                        // 添加到历史
-                        let connection_name = state.selected_connection
-                            .and_then(|idx| state.connections.get(idx))
-                            .map(|c| c.name.clone())
-                            .unwrap_or_else(|| "未连接".to_string());
-                        
-                        state.command_history.add(
-                            state.command_input.clone(),
-                            connection_name
-                        );
-                        
-                        execute_ssh_command(state, state.command_input.clone());
-                        state.command_input.clear();
+    // 获取活跃标签的可变引用
+    if let Some(tab) = state.tab_manager.active_tab_mut() {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("💻 Terminal");
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // 历史搜索按钮
+                    if ui.button("🔍 History (Ctrl+R)").clicked() 
+                        || ui.input(|i| i.key_pressed(egui::Key::R) && i.modifiers.ctrl) {
+                        // TODO: 使用标签的历史
                     }
+                });
+            });
+            
+            ui.separator();
 
-            let connected = state
-                .selected_connection
-                .and_then(|i| state.connection_status.get(i))
-                .map(|s| *s == ConnectionStatus::Connected)
-                .unwrap_or(false);
+            egui::ScrollArea::vertical()
+                .min_scrolled_height(ui.available_height() - 60.0)
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut tab.state.terminal_output)
+                            .code_editor()
+                            .desired_rows(10)
+                            .lock_focus(true),
+                    );
+                });
 
-            ui.label(if connected {
-                "🟢 Connected"
-            } else {
-                "🔴 Disconnected"
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut tab.state.command_input).hint_text("Enter command..."),
+                );
+                
+                let connected = tab.state.connection_status == crate::types::ConnectionStatus::Connected;
+                
+                ui.label(if connected {
+                    "🟢 Connected"
+                } else {
+                    "🔴 Disconnected"
+                });
             });
         });
-    });
+    }
     
     // 渲染历史搜索窗口
     render_history_search_window(state, ctx);

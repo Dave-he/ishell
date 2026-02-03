@@ -58,7 +58,7 @@ pub fn render_tab_bar(tab_manager: &mut TabManager, ctx: &Context) {
                             }
                             
                             // 鼠标悬停时显示完整标题和右键菜单
-                            let mut response = if !tab.title.is_empty() {
+                            let response = if !tab.title.is_empty() {
                                 tab_button.on_hover_text(&tab.title)
                             } else {
                                 tab_button
