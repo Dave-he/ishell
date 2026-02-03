@@ -101,7 +101,7 @@ impl App {
             connection_status,
 
             terminal_output:
-                "Welcome to iShell v0.2.0! 🚀\nType commands after connecting to a server.\n\n"
+                "Welcome to iShell v0.3.0! 🚀\nType commands after connecting to a server.\n\n"
                     .to_string(),
             command_input: String::new(),
 
