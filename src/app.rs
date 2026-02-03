@@ -237,8 +237,8 @@ impl eframe::App for App {
         panels::render_terminal_panel(&mut self.state, ctx);
         panels::render_new_connection_dialog(&mut self.state, ctx);
         
-        // Render file browser (v0.3.0)
-        crate::ui::file_browser::render_file_browser(&mut self.state, ctx);
+        // Render file browser (v1.0.0 - simplified for tab binding testing)
+        crate::ui::file_browser_simple::render_file_browser(&mut self.state, ctx);
         
         // Render settings window (v0.3.0 - Phase 4)
         crate::ui::settings_panel::render_settings_window(&mut self.state, ctx);

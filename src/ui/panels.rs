@@ -1,5 +1,5 @@
 use crate::app::{
-    connect_ssh, create_connection, disconnect_ssh, execute_ssh_command, send_ai_message,
+    connect_ssh, create_connection, disconnect_ssh, send_ai_message,
 };
 use crate::state::AppState;
 use crate::types::*;
@@ -66,63 +66,66 @@ pub fn render_connections_panel(state: &mut AppState, ctx: &egui::Context) {
 }
 
 pub fn render_ai_panel(state: &mut AppState, ctx: &egui::Context) {
-    egui::SidePanel::right("ai_panel")
-        .default_width(300.0)
-        .show(ctx, |ui| {
-            ui.heading("🤖 AI Assistant");
-            ui.separator();
+    // 获取活跃标签的可变引用
+    if let Some(tab) = state.tab_manager.active_tab_mut() {
+        egui::SidePanel::right("ai_panel")
+            .default_width(300.0)
+            .show(ctx, |ui| {
+                ui.heading("🤖 AI Assistant (v1.0.0)");
+                ui.separator();
 
-            ui.horizontal(|ui| {
-                ui.label("Provider:");
-                ui.heading(match state.ai_provider {
-                    AiProviderType::Ollama => "🦙 Ollama",
-                    AiProviderType::OpenAI => "🤖 OpenAI",
-                    AiProviderType::Google => "🔷 Google",
-                });
-            });
-
-            ui.separator();
-
-            egui::ScrollArea::vertical()
-                .min_scrolled_height(200.0)
-                .show(ui, |ui| {
-                    for (role, message) in &state.ai_messages {
-                        let color = if role == "user" {
-                            egui::Color32::from_rgb(200, 230, 201)
-                        } else {
-                            egui::Color32::from_rgb(225, 225, 225)
-                        };
-
-                        ui.scope(|ui| {
-                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                            ui.painter().rect_filled(
-                                ui.available_rect_before_wrap(),
-                                egui::Rounding::default(),
-                                color,
-                            );
-                            ui.label(message);
-                        });
-                        ui.add_space(4.0);
-                    }
-
-                    if state.ai_loading {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("AI is thinking...");
-                        });
-                    }
+                ui.horizontal(|ui| {
+                    ui.label("Provider:");
+                    ui.heading(match state.ai_provider {
+                        AiProviderType::Ollama => "🦙 Ollama",
+                        AiProviderType::OpenAI => "🤖 OpenAI",
+                        AiProviderType::Google => "🔷 Google",
+                    });
                 });
 
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut state.ai_input).hint_text("Ask AI..."));
-                if (ui.button("Send").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                    && !state.ai_input.trim().is_empty() {
-                        send_ai_message(state, state.ai_input.clone());
-                        state.ai_input.clear();
-                    }
+                ui.separator();
+                ui.label(format!("Active tab: {}", tab.title));
+                ui.label(format!("Messages: {}", tab.state.ai_messages.len()));
+
+                ui.separator();
+
+                egui::ScrollArea::vertical()
+                    .min_scrolled_height(200.0)
+                    .show(ui, |ui| {
+                        for (role, message) in &tab.state.ai_messages {
+                            let color = if role == "user" {
+                                egui::Color32::from_rgb(200, 230, 201)
+                            } else {
+                                egui::Color32::from_rgb(225, 225, 225)
+                            };
+
+                            ui.scope(|ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                                ui.painter().rect_filled(
+                                    ui.available_rect_before_wrap(),
+                                    egui::Rounding::default(),
+                                    color,
+                                );
+                                ui.label(message);
+                            });
+                            ui.add_space(4.0);
+                        }
+
+                        if state.ai_loading {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label("AI is thinking...");
+                            });
+                        }
+                    });
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut tab.state.ai_input).hint_text("Ask AI..."));
+                    ui.label("(Tab-specific)");
+                });
             });
-        });
+    }
 }
 
 pub fn render_monitor_panel(state: &mut AppState, ctx: &egui::Context) {

@@ -1,10 +1,12 @@
 use crate::state::AppState;
 use crate::types::{ConnectionStatus, FileEntry};
+use crate::tabs::TabManager;  // v1.0.0: 标签管理器
 use eframe::egui;
 use std::path::PathBuf;
 
 // ============================================================================
 // 文件浏览器 UI (简化版 v0.3.0)
+// v1.0.0: 支持 SFTP 状态绑定到活跃标签
 // ============================================================================
 
 pub fn render_file_browser(state: &mut AppState, ctx: &egui::Context) {
@@ -12,98 +14,176 @@ pub fn render_file_browser(state: &mut AppState, ctx: &egui::Context) {
         return;
     }
 
-    egui::Window::new("📁 文件浏览器")
-        .default_width(1000.0)
+    // 检查连接状态
+    let is_connected = check_connected_to_any(state);
+    
+    egui::Window::new("📁 SFTP File Browser")
+        .default_width(900.0)
         .default_height(600.0)
-        .resizable(true)
         .show(ctx, |ui| {
+            // 检查是否有连接
+            if !is_connected {
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    "⚠️ Please connect to a server first!",
+                );
+                return;
+            }
+
             // 工具栏
             ui.horizontal(|ui| {
-                ui.heading("文件传输");
+                ui.heading("File Transfer");
                 
                 ui.separator();
                 
                 // 上传按钮
-                let upload_enabled = !state.selected_local_files.is_empty() && is_connected(state);
-                if ui.add_enabled(upload_enabled, egui::Button::new("⬆️ 上传"))
-                    .on_hover_text("上传选中的本地文件")
-                    .clicked() 
+                let upload_enabled = !state.selected_local_files.is_empty();
+                if ui.add_enabled(upload_enabled, egui::Button::new("⬆️ Upload"))
+                    .on_hover_text("Upload selected file(s) to Downloads folder")
+                    .clicked()
                 {
-                    upload_selected_files(state);
+                    upload_files_to_active_tab(state);
                 }
-                
+
                 // 下载按钮
                 let download_enabled = !state.selected_remote_files.is_empty();
-                if ui.add_enabled(download_enabled, egui::Button::new("⬇️ 下载"))
-                    .on_hover_text("下载选中的远程文件")
-                    .clicked() 
+                if ui.add_enabled(download_enabled, egui::Button::new("⬇️ Download"))
+                    .on_hover_text("Download selected file(s) to Downloads folder")
+                    .clicked()
                 {
-                    download_selected_files(state);
+                    download_files_from_active_tab(state);
                 }
-                
+
                 ui.separator();
-                
+
                 // 刷新按钮
-                if ui.button("🔄 刷新").clicked() {
-                    refresh_local_files(state);
-                    if is_connected(state) {
-                        request_file_list(state);
-                    }
+                if ui.button("🔄 Refresh").clicked() {
+                    refresh_remote_files(state);
                 }
-                
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("❌ 关闭").clicked() {
-                        state.show_file_browser = false;
-                    }
-                });
+
+                ui.separator();
+
+                if ui.button("🏠 Home").clicked() {
+                    go_to_home(state);
+                }
+
+                if ui.button("⬆️ Up").clicked() {
+                    go_parent_dir(state);
+                }
             });
-            
+
             ui.separator();
-            
-            // 双栏布局
-            ui.columns(2, |columns| {
-                // 左栏：本地文件
-                columns[0].group(|ui| {
-                    render_local_panel(state, ui);
-                });
-                
-                // 右栏：远程文件  
-                columns[1].group(|ui| {
-                    render_remote_panel(state, ui);
-                });
-            });
-            
+
+            // 远程文件列表
+            ui.heading("☁️ Remote Files");
             ui.separator();
-            
+
+            egui::ScrollArea::vertical()
+                .max_height(450.0)
+                .show(ui, |ui| {
+                    render_remote_files(state, ui);
+                });
+
+            ui.separator();
+
             // 状态栏
             ui.horizontal(|ui| {
+                if ui.button("❌ Close").clicked() {
+                    state.show_file_browser = false;
+                }
+
+                ui.separator();
+
                 if !state.sftp_status.is_empty() {
-                    let color = if state.sftp_status.contains("Error") || state.sftp_status.contains("failed") {
-                        egui::Color32::RED
-                    } else if state.sftp_status.contains("Complete") || state.sftp_status.contains("成功") {
-                        egui::Color32::GREEN
-                    } else {
-                        egui::Color32::LIGHT_BLUE
-                    };
-                    ui.colored_label(color, &state.sftp_status);
-                } else {
-                    ui.label("就绪");
+                    ui.label(&state.sftp_status);
                 }
             });
-            
+
             // 进度条
             if state.sftp_progress > 0.0 && state.sftp_progress < 1.0 {
                 ui.separator();
                 ui.add(
                     egui::ProgressBar::new(state.sftp_progress)
-                        .text(format!("{:.0}%", state.sftp_progress * 100.0))
-                        .animate(true),
+                        .text(format!("{:.0}%", state.sftp_progress * 100.0)),
                 );
             }
         });
-    
-    // 处理文件拖入
-    handle_file_drop(state, ctx);
+}
+
+/// 检查是否有任何连接（用于 SFTP）
+fn check_connected_to_any(state: &AppState) -> bool {
+    state.connection_status.iter()
+        .any(|&s| s == ConnectionStatus::Connected)
+}
+
+/// 获取活跃标签的 SFTP 状态（如果有）
+fn get_active_tab_sftp_state(state: &mut AppState) -> Option<&mut crate::state::SftpTabState> {
+    state.tab_manager.active_tab_mut()
+        .map(|tab| tab.state.sftp_state.as_mut())
+        .flatten()
+}
+
+/// 初始化活跃标签的 SFTP 状态
+fn init_tab_sftp_state(state: &mut AppState) {
+    if let Some(tab) = state.tab_manager.active_tab_mut() {
+        if tab.state.sftp_state.is_none() {
+            tab.state.sftp_state = Some(crate::state::SftpTabState {
+                remote_path: "/".to_string(),
+                remote_files: Vec::new(),
+                selected_files: Vec::new(),
+            });
+        }
+    }
+}
+
+/// 上传文件到活跃标签
+fn upload_files_to_active_tab(state: &mut AppState) {
+    init_tab_sftp_state(state);
+    // TODO: 实现上传逻辑
+    eprintln!("Upload to active tab - TODO");
+}
+
+/// 从活跃标签下载文件
+fn download_files_from_active_tab(state: &mut AppState) {
+    // TODO: 实现下载逻辑
+    eprintln!("Download from active tab - TODO");
+}
+
+/// 刷新活跃标签的远程文件
+fn refresh_remote_files(state: &mut AppState) {
+    // TODO: 实现刷新逻辑
+    eprintln!("Refresh remote files - TODO");
+}
+
+/// 转到上级目录（活跃标签）
+fn go_parent_dir(state: &mut AppState) {
+    if let Some(tab) = state.tab_manager.active_tab_mut() {
+        if let Some(sftp_state) = tab.state.sftp_state.as_mut() {
+            let path = &sftp_state.remote_path;
+            if path == "/" {
+                return;
+            }
+
+            let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+            if parts.is_empty() {
+                sftp_state.remote_path = "/".to_string();
+            } else {
+                sftp_state.remote_path = format!("/{}", parts[..parts.len() - 1].join("/"));
+                if sftp_state.remote_path.is_empty() {
+                    sftp_state.remote_path = "/".to_string();
+                }
+            }
+        }
+    }
+}
+
+/// 转到主目录（活跃标签）
+fn go_to_home(state: &mut AppState) {
+    if let Some(tab) = state.tab_manager.active_tab_mut() {
+        if let Some(sftp_state) = tab.state.sftp_state.as_mut() {
+            sftp_state.remote_path = "/".to_string();
+        }
+    }
 }
 
 // ============================================================================
@@ -488,26 +568,6 @@ fn handle_file_drop(state: &mut AppState, ctx: &egui::Context) {
             }
         }
     });
-}
-
-/// 返回上级目录
-fn go_parent_dir(state: &mut AppState) {
-    let path = &state.remote_current_path;
-    if path == "/" {
-        return;
-    }
-
-    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if parts.is_empty() {
-        state.remote_current_path = "/".to_string();
-    } else {
-        state.remote_current_path = format!("/{}", parts[..parts.len() - 1].join("/"));
-        if state.remote_current_path.is_empty() {
-            state.remote_current_path = "/".to_string();
-        }
-    }
-
-    request_file_list(state);
 }
 
 /// 格式化文件大小
