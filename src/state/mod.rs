@@ -3,6 +3,7 @@ use crate::config::ConfigManager;
 use crate::history::CommandHistory;
 use crate::monitor::SystemMonitor;
 use crate::ssh::SshSession;
+use crate::tabs::TabManager;  // v1.0.0: 标签管理器
 use crate::types::{AiProviderType, AppConfig, ConnectionStatus, FileEntry, SettingsPage, SftpMessage, SshConfig};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex as TokioMutex};
@@ -40,6 +41,9 @@ pub struct AppState {
     // 配置管理
     pub config_manager: ConfigManager,
     pub config: AppConfig,
+
+    // 标签管理 (v1.0.0)
+    pub tab_manager: TabManager,
 
     // 连接管理
     pub connections: Vec<SshConfig>,

@@ -85,6 +85,7 @@ impl App {
 
         let state = AppState {
             config_manager,
+            tab_manager: crate::tabs::TabManager::new(),  // v1.0.0: 初始化标签管理器
             connections: connections.clone(),
             selected_connection: None,
             show_new_connection: false,
@@ -156,6 +157,9 @@ impl eframe::App for App {
         // 应用主题
         crate::theme::ThemeManager::apply(ctx, &self.state.config.settings.theme);
 
+        // 处理键盘快捷键 (v1.0.0)
+        crate::ui::tab_bar::handle_tab_shortcuts(&mut self.state.tab_manager, ctx);
+
         // 处理异步消息
         process_ssh_messages(&mut self.state);
         process_ai_messages(&mut self.state);
@@ -222,6 +226,9 @@ impl eframe::App for App {
                 });
             });
         });
+
+        // 渲染标签栏 (v1.0.0)
+        crate::ui::tab_bar::render_tab_bar(&mut self.state.tab_manager, ctx);
 
         // Render panels using the new module structure
         panels::render_connections_panel(&mut self.state, ctx);
@@ -605,6 +612,7 @@ mod tests {
         let state = AppState {
             config_manager,
             config: AppConfig::default(),
+            tab_manager: crate::tabs::TabManager::new(),  // v1.0.0
             connections: Vec::new(),
             selected_connection: None,
             show_new_connection: false,
