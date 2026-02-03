@@ -135,7 +135,7 @@ impl App {
             cpu_usage: 0.0,
             mem_usage: 45.0,
 
-            command_history: crate::history::CommandHistory::new(),
+            command_history: load_command_history(),
             show_history_search: false,
             history_search_query: String::new(),
 
@@ -175,6 +175,7 @@ impl eframe::App for App {
                     }
                     ui.separator();
                     if ui.button("🚪 Quit").clicked() {
+                        save_command_history(&self.state);
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
@@ -182,6 +183,10 @@ impl eframe::App for App {
                 ui.menu_button("🔧 Tools", |ui| {
                     if ui.button("📁 File Browser").clicked() {
                         self.state.show_file_browser = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("🔍 Command History").clicked() {
+                        self.state.show_history_search = true;
                         ui.close_menu();
                     }
                     if ui.button("🔑 SSH Keys").clicked() {
@@ -234,10 +239,46 @@ impl eframe::App for App {
         // 请求重绘
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // 保存命令历史
+        save_command_history(&self.state);
+    }
 }
 
 // 独立函数 - 逻辑处理
 // ============================================================================
+
+// 加载命令历史
+fn load_command_history() -> crate::history::CommandHistory {
+    if let Some(config_dir) = dirs::config_dir() {
+        let history_path = config_dir.join("ishell").join("history.json");
+        if history_path.exists() {
+            match crate::history::CommandHistory::load(&history_path) {
+                Ok(history) => {
+                    eprintln!("✅ Loaded {} commands from history", history.commands.len());
+                    return history;
+                }
+                Err(e) => {
+                    eprintln!("⚠️ Failed to load history: {}", e);
+                }
+            }
+        }
+    }
+    crate::history::CommandHistory::new()
+}
+
+// 保存命令历史
+fn save_command_history(state: &AppState) {
+    if let Some(config_dir) = dirs::config_dir() {
+        let history_path = config_dir.join("ishell").join("history.json");
+        if let Err(e) = state.command_history.save(&history_path) {
+            eprintln!("⚠️ Failed to save history: {}", e);
+        } else {
+            eprintln!("✅ Saved {} commands to history", state.command_history.commands.len());
+        }
+    }
+}
 
 // 处理 SSH 消息
 fn process_ssh_messages(state: &mut AppState) {

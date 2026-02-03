@@ -586,3 +586,116 @@ mod integration_tests {
         assert!(loaded.ai.openai.api_key.is_some());
     }
 }
+
+#[cfg(test)]
+mod history_tests {
+    use ishell::history::CommandHistory;
+
+    #[test]
+    fn test_command_history_creation() {
+        let history = CommandHistory::new();
+        assert_eq!(history.commands.len(), 0);
+    }
+
+    #[test]
+    fn test_add_command() {
+        let mut history = CommandHistory::new();
+        history.add("ls -la".to_string(), "server1".to_string());
+        
+        assert_eq!(history.commands.len(), 1);
+        assert_eq!(history.commands[0].command, "ls -la");
+        assert_eq!(history.commands[0].connection, "server1");
+    }
+
+    #[test]
+    fn test_search_commands() {
+        let mut history = CommandHistory::new();
+        history.add("ls -la".to_string(), "server1".to_string());
+        history.add("cd /home".to_string(), "server1".to_string());
+        history.add("cat file.txt".to_string(), "server2".to_string());
+        
+        let results = history.search("ls");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].command, "ls -la");
+        
+        let all_results = history.search("");
+        assert_eq!(all_results.len(), 3);
+    }
+
+    #[test]
+    fn test_history_stats() {
+        let mut history = CommandHistory::new();
+        history.add("ls".to_string(), "server1".to_string());
+        history.add("ls".to_string(), "server1".to_string());
+        history.add("cd /home".to_string(), "server2".to_string());
+        
+        let stats = history.stats();
+        assert_eq!(stats.total_commands, 3);
+        assert_eq!(stats.unique_commands, 2);
+        assert_eq!(stats.unique_connections, 2);
+    }
+
+    #[test]
+    fn test_save_and_load_history() {
+        let temp_dir = std::env::temp_dir();
+        let rand_val: u32 = rand::Rng::gen(&mut rand::thread_rng());
+        let history_path = temp_dir.join(format!("test_history_{}.json", rand_val));
+
+        // Create and save history
+        let mut history = CommandHistory::new();
+        history.add("echo hello".to_string(), "server1".to_string());
+        history.add("ls -la".to_string(), "server2".to_string());
+        
+        let save_result = history.save(&history_path);
+        assert!(save_result.is_ok(), "Failed to save history");
+
+        // Load history
+        let loaded = CommandHistory::load(&history_path);
+        assert!(loaded.is_ok(), "Failed to load history");
+        
+        let loaded_history = loaded.unwrap();
+        assert_eq!(loaded_history.commands.len(), 2);
+        assert_eq!(loaded_history.commands[0].command, "echo hello");
+        assert_eq!(loaded_history.commands[1].command, "ls -la");
+
+        // Cleanup
+        let _ = std::fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn test_clear_history() {
+        let mut history = CommandHistory::new();
+        history.add("ls".to_string(), "server1".to_string());
+        history.add("pwd".to_string(), "server1".to_string());
+        
+        assert_eq!(history.commands.len(), 2);
+        
+        history.clear();
+        assert_eq!(history.commands.len(), 0);
+    }
+
+    #[test]
+    fn test_history_max_size() {
+        let mut history = CommandHistory::new().with_max_size(3);
+        
+        history.add("cmd1".to_string(), "server".to_string());
+        history.add("cmd2".to_string(), "server".to_string());
+        history.add("cmd3".to_string(), "server".to_string());
+        assert_eq!(history.commands.len(), 3);
+        
+        // Adding 4th command should remove the first
+        history.add("cmd4".to_string(), "server".to_string());
+        assert_eq!(history.commands.len(), 3);
+        assert_eq!(history.commands[0].command, "cmd2");
+        assert_eq!(history.commands[2].command, "cmd4");
+    }
+
+    #[test]
+    fn test_ignore_empty_commands() {
+        let mut history = CommandHistory::new();
+        history.add("".to_string(), "server".to_string());
+        history.add("   ".to_string(), "server".to_string());
+        
+        assert_eq!(history.commands.len(), 0);
+    }
+}
