@@ -157,9 +157,25 @@ pub struct AiConfig {
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
+    // AI 设置
     pub default_ai_provider: AiProviderType,
+    
+    // 外观设置
     pub theme: String,
+    pub font_size: f32,
     pub terminal_font_size: f32,
+    
+    // 行为设置
+    pub auto_save_config: bool,
+    pub confirm_before_delete: bool,
+    
+    // 终端设置
+    pub terminal_scrollback: usize,
+    pub terminal_word_wrap: bool,
+    
+    // 历史设置
+    pub history_max_size: usize,
+    pub save_history_on_exit: bool,
 }
 
 impl Default for Settings {
@@ -167,7 +183,14 @@ impl Default for Settings {
         Self {
             default_ai_provider: AiProviderType::Ollama,
             theme: "dark".to_string(),
+            font_size: 14.0,
             terminal_font_size: 14.0,
+            auto_save_config: true,
+            confirm_before_delete: true,
+            terminal_scrollback: 10000,
+            terminal_word_wrap: false,
+            history_max_size: 1000,
+            save_history_on_exit: true,
         }
     }
 }
@@ -203,6 +226,20 @@ pub enum ConnectionStatus {
 
 /// 操作结果
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+// ============================================================================
+// 设置界面 (v0.3.0)
+// ============================================================================
+
+/// 设置页面
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsPage {
+    General,
+    Appearance,
+    Terminal,
+    Ai,
+    History,
+}
 
 // ============================================================================
 // SFTP 类型 (v0.3.0)

@@ -1,8 +1,9 @@
 use crate::ai::AiManager;
 use crate::config::ConfigManager;
+use crate::history::CommandHistory;
 use crate::monitor::SystemMonitor;
 use crate::ssh::SshSession;
-use crate::types::{AiProviderType, AppConfig, ConnectionStatus, FileEntry, SftpMessage, SshConfig};
+use crate::types::{AiProviderType, AppConfig, ConnectionStatus, FileEntry, SettingsPage, SftpMessage, SshConfig};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 
@@ -92,9 +93,19 @@ pub struct AppState {
     pub sftp_msg_tx: mpsc::UnboundedSender<SftpMessage>,
     pub sftp_msg_rx: Arc<std::sync::Mutex<mpsc::UnboundedReceiver<SftpMessage>>>,
 
-    // 系统监控（模拟）
+    // 系统监控 (v0.3.0)
+    pub system_monitor: Arc<SystemMonitor>,
     pub cpu_usage: f32,
     pub mem_usage: f32,
+
+    // 命令历史 (v0.3.0)
+    pub command_history: CommandHistory,
+    pub show_history_search: bool,
+    pub history_search_query: String,
+
+    // 设置界面 (v0.3.0)
+    pub show_settings: bool,
+    pub settings_page: SettingsPage,
 
     // Tokio 运行时
     pub runtime: Arc<tokio::runtime::Runtime>,

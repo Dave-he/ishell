@@ -36,6 +36,9 @@ async-trait = "0.1"
 toml = "0.8"
 dirs = "5.0"
 
+# Fuzzy search
+fuzzy-matcher = "0.3"
+
 # File Dialog
 rfd = "0.14"
 

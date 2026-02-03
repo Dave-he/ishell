@@ -131,8 +131,16 @@ impl App {
             sftp_msg_tx,
             sftp_msg_rx,
 
+            system_monitor: Arc::new(crate::monitor::SystemMonitor::new()),
             cpu_usage: 0.0,
             mem_usage: 45.0,
+
+            command_history: crate::history::CommandHistory::new(),
+            show_history_search: false,
+            history_search_query: String::new(),
+
+            show_settings: false,
+            settings_page: crate::types::SettingsPage::General,
 
             runtime,
             config,
@@ -144,6 +152,9 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 应用主题
+        crate::theme::ThemeManager::apply(ctx, &self.state.config.settings.theme);
+
         // 处理异步消息
         process_ssh_messages(&mut self.state);
         process_ai_messages(&mut self.state);
@@ -177,6 +188,7 @@ impl eframe::App for App {
                         ui.close_menu();
                     }
                     if ui.button("⚙️ Settings").clicked() {
+                        self.state.show_settings = true;
                         ui.close_menu();
                     }
                 });
@@ -214,9 +226,10 @@ impl eframe::App for App {
         
         // Render file browser (v0.3.0)
         crate::ui::file_browser::render_file_browser(&mut self.state, ctx);
+        
+        // Render settings window (v0.3.0) - TODO: Phase 4
+        // crate::ui::settings_panel::render_settings_window(&mut self.state, ctx);
 
-        // Render file browser (v0.3.0)
-        crate::ui::file_browser::render_file_browser(&mut self.state, ctx);
 
         // 请求重绘
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -593,8 +606,16 @@ mod tests {
             sftp_msg_tx,
             sftp_msg_rx,
 
+            system_monitor: Arc::new(crate::monitor::SystemMonitor::new()),
             cpu_usage: 0.0,
             mem_usage: 0.0,
+
+            command_history: crate::history::CommandHistory::new(),
+            show_history_search: false,
+            history_search_query: String::new(),
+
+            show_settings: false,
+            settings_page: SettingsPage::General,
 
             runtime,
         };
