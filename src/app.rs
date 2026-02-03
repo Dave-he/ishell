@@ -232,8 +232,8 @@ impl eframe::App for App {
         // Render file browser (v0.3.0)
         crate::ui::file_browser::render_file_browser(&mut self.state, ctx);
         
-        // Render settings window (v0.3.0) - TODO: Phase 4
-        // crate::ui::settings_panel::render_settings_window(&mut self.state, ctx);
+        // Render settings window (v0.3.0 - Phase 4)
+        crate::ui::settings_panel::render_settings_window(&mut self.state, ctx);
 
 
         // 请求重绘
